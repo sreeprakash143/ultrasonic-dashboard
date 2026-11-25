@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ultrasonic Distance Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	padding: 25px;
+	background: #0f172a;
+	color: white;
+	font-family: Arial, sans-serif;
+}
+
+.container { max-width: 590px; margin: auto; }
+
+h2 { text-align: center; margin-bottom: 8px; }
+
+.connection {
+	text-align: center;
+	color: #94a3b8;
+	margin-bottom: 22px;
+}
+
+.dot { color: #ef4444; }
+
+.card {
+	background: #1e293b;
+	padding: 22px;
+	border-radius: 18px;
+	margin-bottom: 18px;
+	box-shadow: 0 5px 15px #0003;
+}
+
+.distance {
+	text-align: center;
+	font-size: 62px;
+	font-weight: bold;
+	color: #38bdf8;
+	margin: 5px;
+}
+
+.distance small { font-size: 22px; color: #94a3b8; }
+
+.updated {
+	text-align: center;
+	color: #64748b;
+	font-size: 13px;
+}
+
+.bar {
+	height: 18px;
+	background: #334155;
+	border-radius: 20px;
+	overflow: hidden;
+	margin-top: 20px;
+}
+
+.fill {
+	height: 100%;
+	width: 0%;
+	background: #22c55e;
+	transition: width 0.3s;
+}
+
+.status {
+	text-align: center;
+	color: #22c55e;
+	margin-top: 12px;
+	font-weight: bold;
+}
+
+.stats {
+	display: flex;
+	justify-content: space-around;
+	text-align: center;
+}
+
+.stats span { color: #94a3b8; font-size: 14px; }
+.stats h3 { margin: 5px; }
+
+.chart-title { color: #cbd5e1; margin-bottom: 10px; }
+
+canvas { width: 100% !important; }
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>Ultrasonic Distance Dashboard</h2>
+
+<div class="connection">
+	<span class="dot" id="dot">●</span>
+	<span id="connection">Connecting…</span>
+	<span id="device"></span>
+</div>
+
+<!-- Distance Card -->
+<div class="card">
+	<div class="distance">
+		<span id="distance">--</span>
+		<small>cm</small>
+	</div>
+	<div class="updated" id="updated">Waiting for data…</div>
+
+	<div class="bar">
+		<div class="fill" id="bar"></div>
+	</div>
+
+	<div class="status" id="status">—</div>
+</div>
+
+<!-- Statistics -->
+<div class="card stats">
+	<div><span>Min</span><h3 id="min">--</h3></div>
+	<div><span>Max</span><h3 id="max">--</h3></div>
+	<div><span>Average</span><h3 id="avg">--</h3></div>
+</div>
+
+<!-- Graph -->
+<div class="card">
+	<div class="chart-title">Last 60 readings</div>
+	<canvas id="distanceChart"></canvas>
+</div>
+
+</div>
+
+<script>
+/* ================= SETTINGS =================
+   DATA_URL: a public URL that returns the latest reading as JSON:
+   {
+     "device_id": "ultrasonic-01",
+     "distance_cm": 36.7,
+     "status": "safe",
+     "timestamp": "2026-11-25T10:21:00Z"
+   }
+   Example (Firebase Realtime Database):
+   "https://YOUR-PROJECT-default-rtdb.firebaseio.com/devices/ultrasonic-01.json"
+
+   Leave it empty ("") to run in Demo Mode with random readings.
+   Never put a secret/write key here — this file is public on GitHub Pages.
+============================================== */
+const DATA_URL       = "";
+const POLL_MS        = 1500;   // how often to ask for new data
+const WARNING_CM     = 20;     // used only if the device sends no "status"
+const MAX_CM         = 200;    // full bar / chart top
+const OFFLINE_AFTER  = 10;     // seconds without new data = "Offline"
+const MAX_POINTS     = 60;
+
+let readings = [];
+let lastTimestamp = null;
+let lastNewDataAt = 0;
+
+const chart = new Chart(document.getElementById("distanceChart"), {
+	type: "line",
+	data: {
+		labels: [],
+		datasets: [{
+			label: "Distance (cm)",
+			data: [],
+			borderColor: "#38bdf8",
+			borderWidth: 2,
+			pointRadius: 0,
+			tension: 0.2
+		}]
+	},
+	options: {
+		responsive: true,
+		animation: false,
+		plugins: { legend: { display: false } },
+		scales: {
+			x: { display: false },
+			y: {
+				min: 0,
+				max: MAX_CM,
+				ticks: { color: "#94a3b8" },
+				grid: { color: "#334155" }
+			}
+		}
+	}
+});
+
+function setConnection(text, color) {
+	document.getElementById("connection").innerText = text;
+	document.getElementById("dot").style.color = color;
+}
+
+function updateDashboard(data) {
+	const distance = Number(data.distance_cm);
+	if (!Number.isFinite(distance)) return;
+
+	readings.push(distance);
+	if (readings.length > MAX_POINTS) readings.shift();
+
+	const min = Math.min(...readings);
+	const max = Math.max(...readings);
+	const avg = readings.reduce((a, b) => a + b, 0) / readings.length;
+
+	document.getElementById("distance").innerText = distance.toFixed(1);
+	document.getElementById("min").innerText = min.toFixed(1);
+	document.getElementById("max").innerText = max.toFixed(1);
+	document.getElementById("avg").innerText = avg.toFixed(1);
+
+	if (data.device_id) {
+		document.getElementById("device").innerText = "· " + data.device_id;
+	}
+
+	const time = data.timestamp ? new Date(data.timestamp) : new Date();
+	document.getElementById("updated").innerText =
+		"Last update: " + time.toLocaleTimeString();
+
+	const bar = document.getElementById("bar");
+	bar.style.width = Math.min(distance / MAX_CM * 100, 100) + "%";
+
+	// Prefer the status sent by the ESP32; fall back to the local threshold
+	const isWarning = data.status
+		? String(data.status).toLowerCase() !== "safe"
+		: distance < WARNING_CM;
+
+	const status = document.getElementById("status");
+	const color = isWarning ? "#ef4444" : "#22c55e";
+	status.innerText = isWarning ? "Warning! Object Nearby" : "Safe Distance";
+	status.style.color = color;
+	bar.style.background = color;
+
+	chart.data.labels.push("");
+	chart.data.datasets[0].data.push(distance);
+	if (chart.data.labels.length > MAX_POINTS) {
+		chart.data.labels.shift();
+		chart.data.datasets[0].data.shift();
+	}
+	chart.update();
+}
+
+async function fetchLive() {
+	try {
+		const res = await fetch(DATA_URL + (DATA_URL.includes("?") ? "&" : "?") + "t=" + Date.now(),
+			{ cache: "no-store" });
+		if (!res.ok) throw new Error("HTTP " + res.status);
+		const data = await res.json();
+		if (!data) throw new Error("No data yet");
+
+		// Only add a point when the device has sent a new reading
+		if (data.timestamp !== lastTimestamp || !data.timestamp) {
+			lastTimestamp = data.timestamp;
+			lastNewDataAt = Date.now();
+			updateDashboard(data);
+		}
+
+		const silentFor = (Date.now() - lastNewDataAt) / 1000;
+		if (silentFor > OFFLINE_AFTER) {
+			setConnection("Device offline (no new data)", "#f59e0b");
+		} else {
+			setConnection("Live", "#22c55e");
+		}
+	} catch (err) {
+		setConnection("Cannot reach server – " + err.message, "#ef4444");
+	}
+}
+
+if (DATA_URL) {
+	fetchLive();
+	setInterval(fetchLive, POLL_MS);
+} else {
+	setConnection("Demo Mode", "#ef4444");
+	setInterval(() => {
+		const d = Math.random() * 180 + 5;
+		updateDashboard({
+			device_id: "demo",
+			distance_cm: d,
+			status: d < WARNING_CM ? "warning" : "safe",
+			timestamp: new Date().toISOString()
+		});
+	}, POLL_MS);
+}
+</script>
+
+</body>
+</html>
